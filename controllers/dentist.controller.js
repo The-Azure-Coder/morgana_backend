@@ -1,4 +1,3 @@
-const { async } = require("rxjs");
 const { JSONResponse } = require("../lib/helper");
 const Dentist = require("../models/dentist.model");
 const Patient = require("../models/patient.model");
