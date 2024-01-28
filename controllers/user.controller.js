@@ -1,88 +1,81 @@
 const { JSONResponse } = require("../lib/helper");
 const jwt = require("jsonwebtoken");
-const bcrypt = require("bcrypt");
-const Users = require("../models/user.model");
+const User = require("../models/user.model");
+const { validationResult } = require('express-validator');
+const {comparePassword, hashPassword } = require("../lib/encrypt");
+const { createAccessToken } = require("../lib/token");
 
 exports.loginUser = async (req, res) => {
-  const username = req.body?.email;
-  const password = req.body?.password;
-  console.log("details", username, password);
-  if (username && password) {
-    await Users.findOne({ email: username }).then(
-      (existUser) => {
-        if (existUser && existUser._id) {
-          bcrypt.compare(
-            password,
-            existUser?.password,
-            function (err, response) {
-              if (!err && response) {
-                const auth = jwt.sign(
-                  { user_id: existUser._id, username },
-                  "secretKey"
-                );
-                res.json({
-                  status: "ok",
-                  loginUser: true,
-                  data: { existUser, response, auth },
-                });
-              } else {
-                res.json({
-                  status: "warn",
-                  loginUser: false,
-                  data: "Please enter valid password",
-                });
-              }
-            }
-          );
-        } else {
-          res.json({
-            status: "warn",
-            loginUser: false,
-            data: "Please enter valid email",
-          });
-        }
-      },
-      (error) => {
-        res.json({ status: "error", data: error });
-      }
-    );
+  const errors = validationResult(req);
+
+  if (!errors.isEmpty()) {
+      return res.status(422).json({ errors: errors.array() });
   }
+  const password =req.body.password
+  const email = req.body.email
+  const existUser = await User.findOne({email: email});
+  if(!existUser){
+    return res.status(400).json({message:'No Matching records found'})
+  }else{
+    const isValid = comparePassword(password,existUser.password);
+    if(!isValid){
+      return res.status(400).json({
+        message: "invalid Credentials"
+    })
+  }
+
+  const accessToken = createAccessToken({existUser: existUser._id})
+
+  res.status(201).json({
+    status: "SUCCESS",
+    data:existUser,
+    token: accessToken
+})
+ 
+}
 };
 
 exports.registerUser = async (req, res) => {
-  const registerUserData = {
-    username: req.body.username,
-    email: req.body.email,
-    password: req.body.password,
-    role: req.body.role,
-  };
 
-  const salt = await bcrypt.genSalt(10);
-  await bcrypt.hash(req.body.password, salt).then((hashedPassword) => {
-    if (hashedPassword) {
-      console.log("hashed password", hashedPassword);
-      registerUserData.password = hashedPassword;
+  try{
+    const errors = validationResult(req);
+
+    if (!errors.isEmpty()) {
+        return res.status(422).json({ errors: errors.array() });
     }
-  });
+    const { username, email, password } = req.body;
+    const existUser = await User.findOne({ email });
 
-  await Users.create(registerUserData)
-    .then((userStoredData) => {
-      if (userStoredData && userStoredData._id) {
-        console.log("user stored data", userStoredData);
-        res.json({ status: "ok", data: userStoredData });
-      }
+    if(existUser){
+        return res.status(400).json({message:'User already exist'})
+    }
+    const hashedPassword = hashPassword(password)
+    const newUser = await User.create({
+        username:username,
+        password: hashedPassword,
+        email: email
     })
-    .catch((err) => {
-      if (err) {
-        res.json({ status: "error", data: err });
-        console.error(err);
-      }
-    });
-};
+    const accessToken = createAccessToken({newUser: newUser._id})
+    return res.status(201).json({
+        status: "SUCCESS",
+        data:newUser,
+        token: accessToken
+    })
+} catch(err){
+ console.log(err)
+ return res.status(err?.status || 500).json({ 
+        status: "FAILED",
+         data: {
+             error: err?.message || err 
+            } 
+        })
+     }
+ 
+}
 
 exports.getAllUsers = async (req, res) => {
   try {
-    const allUsers = await Users.find();
+    const allUsers = await User.find();
     JSONResponse.success(res, "Success.", allUsers, 200);
   } catch (error) {
     JSONResponse.error(
@@ -96,7 +89,7 @@ exports.getAllUsers = async (req, res) => {
 
 exports.getUserById = async (req, res) => {
   try {
-    const user = await Users.findById(req.params.id);
+    const user = await User.findById(req.params.id);
     JSONResponse.success(res, "Success.", user, 200);
   } catch (error) {
     JSONResponse.error(res, "Failure handling user Model.", error, 500);
@@ -105,7 +98,7 @@ exports.getUserById = async (req, res) => {
 
 exports.updateUser = async (req, res) => {
   try {
-    const updatedUser = await Users.findByIdAndUpdate(req.params.id, req.body);
+    const updatedUser = await User.findByIdAndUpdate(req.params.id, req.body);
     JSONResponse.success(res, "Success.", updatedUser, 200);
   } catch (error) {
     JSONResponse.error(
@@ -119,7 +112,7 @@ exports.updateUser = async (req, res) => {
 
 exports.deleteUserById = async (req, res) => {
   try {
-    const user = await Users.findById(req.params.id);
+    const user = await User.findById(req.params.id);
     if (user) await user.delete();
     JSONResponse.success(res, "Success.", user, 200);
   } catch (error) {
